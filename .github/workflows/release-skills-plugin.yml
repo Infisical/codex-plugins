@@ -2,25 +2,34 @@ name: Release skills plugin
 
 # Builds the infisical-skills plugin ZIP from Infisical/ai-skills.
 #
+# - Publish a release in GitHub (Releases > Draft a new release) with a tag v<version>, such as v1.2.0.
+#   The workflow builds the plugin with the tag's version, from ai-skills main, and attaches
+#   infisical-skills-<version>.zip to the release. It adds the ai-skills commit the skills came from to the release
+#   notes.
 # - Run it by hand (Actions > Release skills plugin > Run workflow) to build the ZIP from any ai-skills ref and download
 #   it from the run's artifacts, without releasing anything.
-# - Push a tag infisical-skills-v<version>, where <version> is the version in infisical-skills/.codex-plugin/plugin.json,
-#   to build from ai-skills main and publish a GitHub release with the ZIP. The release notes record the ai-skills
-#   commit the skills came from.
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       ai_skills_ref:
         description: Branch, tag, or commit of Infisical/ai-skills to take the skills from
         default: main
         required: true
-  push:
-    tags:
-      - "infisical-skills-v*"
+      version:
+        description: Plugin version, such as v1.2.0 (default, the version in infisical-skills/.codex-plugin/plugin.json)
+        required: false
 
 permissions:
   contents: read
+
+# An explicit bash runs steps with -eo pipefail. GitHub's default for steps without a shell, bash -e, lets a failed
+# command in a pipeline pass.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build:
@@ -28,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      zip: ${{ steps.build.outputs.zip }}
       version: ${{ steps.build.outputs.version }}
       source_commit: ${{ steps.build.outputs.source_commit }}
     steps:
@@ -41,17 +49,8 @@ jobs:
         id: build
         env:
           AI_SKILLS_REF: ${{ inputs.ai_skills_ref || 'main' }}
-        run: scripts/build-skills-plugin.sh --ref "$AI_SKILLS_REF"
-
-      - name: Check that the tag matches the plugin version
-        if: github.event_name == 'push'
-        env:
-          VERSION: ${{ steps.build.outputs.version }}
-        run: |
-          if [ "$GITHUB_REF_NAME" != "infisical-skills-v$VERSION" ]; then
-            echo "::error::The tag is $GITHUB_REF_NAME, but the plugin version is $VERSION. Tag infisical-skills-v$VERSION, or change the version in infisical-skills/.codex-plugin/plugin.json."
-            exit 1
-          fi
+          VERSION: ${{ github.event.release.tag_name || inputs.version }}
+        run: scripts/build-skills-plugin.sh --ref "$AI_SKILLS_REF" ${VERSION:+--version "$VERSION"}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -60,9 +59,9 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Release
+    name: Attach to the release
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -72,19 +71,31 @@ jobs:
         with:
           name: infisical-skills-${{ needs.build.outputs.version }}
 
-      - name: Publish the release
+      - name: Upload the ZIP and record its source
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
           VERSION: ${{ needs.build.outputs.version }}
           SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
         run: |
           zip="infisical-skills-$VERSION.zip"
+          gh release upload "$TAG" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
+          # Add the build details to the notes, once: a rerun replaces them instead of adding them again. The notes are
+          # read in a command of their own, so that a failed read stops the job before the edit below could replace
+          # them with only the build details.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body >current-notes.md; then
+            echo "::error::Could not read the notes of release $TAG, so they were not changed. The ZIP is attached; rerun the job to add the build details."
+            exit 1
+          fi
+          # Keep the notes up to an earlier build section, without the blank lines before it.
+          awk '/^<!-- infisical-skills build -->/ { exit } { lines[++n] = $0 }
+            END { while (n > 0 && lines[n] ~ /^[ \t\r]*$/) n--; for (i = 1; i <= n; i++) print lines[i] }' \
+            current-notes.md >notes.md
           {
-            echo "Infisical skills plugin for Codex, version $VERSION."
             echo
-            echo "Skills from https://github.com/Infisical/ai-skills/tree/$SOURCE_COMMIT"
+            echo "<!-- infisical-skills build -->"
+            echo "**infisical-skills $VERSION**: skills from https://github.com/Infisical/ai-skills/tree/$SOURCE_COMMIT"
             echo
-            echo "SHA-256 of $zip: \`$(sha256sum "$zip" | cut -d ' ' -f 1)\`"
-          } >notes.md
-          gh release create "$GITHUB_REF_NAME" "$zip" --repo "$GITHUB_REPOSITORY" \
-            --title "infisical-skills $VERSION" --notes-file notes.md
+            echo "SHA-256 of \`$zip\`: \`$(sha256sum "$zip" | cut -d ' ' -f 1)\`"
+          } >>notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

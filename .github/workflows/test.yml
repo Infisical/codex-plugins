@@ -30,3 +30,16 @@ jobs:
 
       - name: Run the hook script tests
         run: tests/test-scan-prompt.sh
+
+  build-skills-plugin:
+    name: Skills plugin build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the build script
+        run: tests/test-build-skills-plugin.sh
+
+      - name: Build the plugin from ai-skills main
+        run: scripts/build-skills-plugin.sh

@@ -118,11 +118,31 @@ When the script runs without the plugin, it keeps the allowlist and your own sca
 
 ## Test locally
 
-From the root of this repository:
+From the root of this repository, add the marketplace from your local copy and install the plugin:
 
 ```
 codex plugin marketplace add ./
 codex plugin add infisical-secret-scanner@infisical
 ```
 
-Then start a new Codex session and trust the hook in `/hooks`. Run the install commands and `codex` with the same `CODEX_HOME`. If you test in a separate Codex home, export `CODEX_HOME` before you install, and start Codex from the same terminal; otherwise the plugin is installed in one home and Codex reads another, and `/hooks` shows no hooks. See [tests](../tests) for the automated tests.
+Then start a new Codex session and trust the hook in `/hooks`. Run the install commands and `codex` with the same `CODEX_HOME`. To test without changing your own Codex config, use a separate Codex home in one terminal:
+
+```
+export CODEX_HOME=$(mktemp -d)
+ln -s ~/.codex/auth.json "$CODEX_HOME/auth.json"
+codex plugin marketplace add ./
+codex plugin add infisical-secret-scanner@infisical
+codex
+```
+
+If `/hooks` shows no hooks, run `echo $CODEX_HOME` in the terminal where you started Codex. The plugin is installed only in the Codex home that was set when you ran `codex plugin add`.
+
+Codex installs a copy of the plugin, so after a change, run `codex plugin remove infisical-secret-scanner@infisical` and add it again, then trust its hook again in `/hooks`.
+
+## Tests
+
+The tests are in [`tests/`](../tests) at the root of this repository. They need the Infisical CLI, jq, and pgrep and pkill (procps on Linux).
+
+- `tests/test-scan-prompt.sh [bash]` tests the hook script on its own: prompts, allow and disallow, failures, config, and concurrent sessions. It checks every result the way Codex reads it, so a result that would let Codex send the prompt fails the test. Pass a bash binary to test another version, such as `/bin/bash` (3.2) on macOS.
+- `tests/test-codex-e2e.sh` installs the plugin into a new, empty Codex home and sends prompts through `codex exec`. It needs a logged-in Codex and makes a few small model requests. All secrets in both tests are fake and made at run time.
+- `tests/trust-hooks.py <plugin id>` trusts a plugin's hooks through `codex app-server`, the same way `/hooks` does. The end-to-end test uses it.
