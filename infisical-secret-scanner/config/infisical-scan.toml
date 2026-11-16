@@ -1,0 +1,22 @@
+# Default scan config for the Infisical Codex plugin.
+#
+# To use your own rules instead, put a config at
+# ~/.codex/plugins/data/infisical-secret-scanner-infisical/infisical-scan.toml.
+# Start it with the [extend] block below to keep the default rules.
+
+title = "Infisical Codex plugin"
+
+[extend]
+useDefault = true
+
+# Values that are clearly placeholders, not secrets, are common in prompts. A placeholder word only allows a secret that
+# is a single word, such as EXAMPLEKEY123: some rules report a whole URL or connection string as the secret, and a real
+# one can hold a word like "example" in its host name.
+[[allowlists]]
+description = "Placeholder values"
+regexTarget = "secret"
+regexes = [
+  '''^<[^<>]+>$''',
+  '''(?i)^(?:your|my)[-_ ][\w.-]*$''',
+  '''(?i)^[\w.-]*(?:example|placeholder|changeme|redacted)[\w.-]*$''',
+]
