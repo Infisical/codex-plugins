@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "Infisical Skills",
     "shortDescription": "Work with Infisical",
-    "longDescription": "Skills that help Codex work with Infisical, the open-source platform for secrets, certificates, and privileged access, using current, accurate guidance instead of guesses.\n\nInfisical API: authenticate with a machine identity, create, read, update, and delete secrets with the v4 endpoints, run batch operations, and manage projects, environments, folders, and identities. Covers pagination and rate limits, for Infisical Cloud and self-hosted instances.",
+    "longDescription": "Bring Infisical expertise into every Codex session.\n\nInfisical Skills teaches Codex how Infisical works, so the code it writes for your secrets workflows is accurate and up to date. Just describe what you need, like pulling secrets into a script, automating secret updates across environments, or giving a service secure access with a machine identity, and Codex takes care of the details.\n\nWorks with Infisical Cloud and self-hosted instances. Spend less time in the docs and more time shipping, while your secrets stay under your control.",
     "developerName": "Infisical",
     "category": "Security",
     "capabilities": [],
@@ -24,10 +24,28 @@
       "How do I authenticate to the Infisical API with a machine identity?",
       "Create secrets in Infisical in bulk with the REST API"
     ],
-    "websiteURL": "https://infisical.com",
+    "websiteURL": "https://github.com/Infisical/ai-skills",
     "privacyPolicyURL": "https://infisical.com/privacy",
     "termsOfServiceURL": "https://infisical.com/terms",
+    "supportURL": "https://infisical.com/talk-to-us",
     "composerIcon": "./assets/icon.png",
     "logo": "./assets/logo.png"
+  },
+  "extensions": {
+    "com.openai": {
+      "review": {
+        "prompts": [
+          "Write a script that lists secret names in my Infisical dev environment without revealing their values.",
+          "Explain how to authenticate to the Infisical API with a machine identity using Universal Auth.",
+          "Write a REST API example that creates two sample secrets in one batch request."
+        ],
+        "commerce": false,
+        "commerce_description": "This informational plugin does not sell products or process payments."
+      },
+      "publication": {
+        "release_notes": "Infisical REST API skill with authentication, v4 secrets CRUD and batch examples, projects and identities, pagination, and rate-limit references.",
+        "countries": []
+      }
+    }
   }
 }
