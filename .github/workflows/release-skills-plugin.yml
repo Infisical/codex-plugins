@@ -25,6 +25,12 @@ on:
 permissions:
   contents: read
 
+# An explicit bash runs steps with -eo pipefail. GitHub's default for steps without a shell, bash -e, lets a failed
+# command in a pipeline pass.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build:
     name: Build
@@ -74,9 +80,17 @@ jobs:
         run: |
           zip="infisical-skills-$VERSION.zip"
           gh release upload "$TAG" "$zip" --clobber --repo "$GITHUB_REPOSITORY"
-          # Add the build details to the notes, once: a rerun replaces them instead of adding them again.
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body |
-            sed '/^<!-- infisical-skills build -->/,$d' >notes.md
+          # Add the build details to the notes, once: a rerun replaces them instead of adding them again. The notes are
+          # read in a command of their own, so that a failed read stops the job before the edit below could replace
+          # them with only the build details.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body >current-notes.md; then
+            echo "::error::Could not read the notes of release $TAG, so they were not changed. The ZIP is attached; rerun the job to add the build details."
+            exit 1
+          fi
+          # Keep the notes up to an earlier build section, without the blank lines before it.
+          awk '/^<!-- infisical-skills build -->/ { exit } { lines[++n] = $0 }
+            END { while (n > 0 && lines[n] ~ /^[ \t\r]*$/) n--; for (i = 1; i <= n; i++) print lines[i] }' \
+            current-notes.md >notes.md
           {
             echo
             echo "<!-- infisical-skills build -->"

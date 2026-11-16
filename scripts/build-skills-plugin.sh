@@ -101,7 +101,7 @@ parse_args() {
 
 require_tools() {
   local tool
-  for tool in git jq zip; do
+  for tool in git jq zip ruby; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed."
   done
 }
@@ -114,25 +114,27 @@ sha256() {
   fi | cut -d ' ' -f 1
 }
 
-# Usage: frontmatter_field <SKILL.md> <field>. Writes the value of a top-level field in the YAML front matter. Handles
-# plain and quoted values on one line, and folded (>) and literal (|) blocks, which are joined into one line.
-frontmatter_field() {
-  awk -v field="$2" '
-    NR == 1 { if ($0 != "---") exit; next }
-    $0 == "---" { exit }
-    collecting {
-      if ($0 ~ /^[ \t]/ || $0 == "") { sub(/^[ \t]+/, ""); value = value (value == "" ? "" : " ") $0; next }
-      exit
-    }
-    index($0, field ":") == 1 {
-      value = substr($0, length(field) + 2)
-      sub(/^[ \t]+/, "", value)
-      sub(/[ \t]+$/, "", value)
-      if (value ~ /^[>|][-+]?$/) { value = ""; collecting = 1; next }
-      if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) value = substr(value, 2, length(value) - 2)
-      exit
-    }
-    END { sub(/[ \t]+$/, "", value); printf "%s", value }' "$1"
+# Usage: read_frontmatter <SKILL.md>. Parses the skill's YAML front matter, the lines between a first line --- and the
+# next line ---, with a real YAML parser, and writes it as a JSON object. When there is none, it has no closing ---, it
+# isn't valid YAML, or it isn't a mapping, it writes why to stderr and returns 1. Ruby's YAML library is used because
+# bash, jq, and Python's standard library have no YAML parser, and a partial one would let broken headers through.
+read_frontmatter() {
+  ruby -ryaml -rjson -rdate -e '
+    begin
+      lines = File.read(ARGV[0], encoding: "UTF-8").lines
+      abort "has no front matter" unless lines.first.to_s.chomp == "---"
+      close = lines[1..-1].index { |line| line.chomp == "---" }
+      abort "has no closing --- after its front matter" unless close
+      begin
+        data = YAML.safe_load(lines[1, close].join, permitted_classes: [Date, Time])
+      rescue Psych::Exception => e
+        abort "has front matter that is not valid YAML: #{e.message.sub(/\A\(<unknown>\): /, "")}"
+      end
+      abort "has front matter that is not a YAML mapping" unless data.is_a?(Hash)
+      puts JSON.generate(data)
+    rescue StandardError => e
+      abort "could not be read: #{e.message}"
+    end' "$1"
 }
 
 # Usage: png_size <file>. Writes the width and height of a PNG, from its IHDR chunk, or returns 1 when it is not a PNG.
@@ -190,17 +192,18 @@ check_icon() {
   file="$1/${3#./}"
   [ -f "$file" ] || { problem "interface.$2 points to a missing file: $3"; return; }
   [ "$(wc -c <"$file")" -le $((5 * 1024 * 1024)) ] || problem "interface.$2 is larger than 5 MiB."
+  # The directory also takes JPEG, WebP, and SVG, but this build can only check the size of a PNG, so it takes only
+  # PNGs: an icon it can't check could be rejected only when the ZIP is uploaded. Add a check here before allowing
+  # another format.
   case "$file" in
-    *.png)
-      size="$(png_size "$file")" || { problem "interface.$2 is not a PNG file: $3"; return; }
-      width="${size% *}"
-      height="${size#* }"
-      [ "$width" = "$height" ] || problem "interface.$2 is not square: ${width}x$height."
-      [ "$width" -ge 48 ] && [ "$width" -le 4096 ] || problem "interface.$2 must be 48 to 4096 pixels wide: $width."
-      ;;
-    *.jpg | *.jpeg | *.webp | *.svg) ;;
-    *) problem "interface.$2 must be a PNG, JPEG, WebP, or SVG file: $3" ;;
+    *.png) ;;
+    *) problem "interface.$2 must be a PNG file, the only format this build can check: $3"; return ;;
   esac
+  size="$(png_size "$file")" || { problem "interface.$2 is not a PNG file: $3"; return; }
+  width="${size% *}"
+  height="${size#* }"
+  [ "$width" = "$height" ] || problem "interface.$2 is not square: ${width}x$height."
+  [ "$width" -ge 48 ] && [ "$width" -le 4096 ] || problem "interface.$2 must be 48 to 4096 pixels wide: $width."
 }
 
 # Usage: check_manifest <plugin folder>. Checks .codex-plugin/plugin.json against the fields that the plugin directory
@@ -265,17 +268,33 @@ set_manifest_version() {
     fail "could not set the version in $manifest."
 }
 
-# Usage: check_skill <plugin folder> <skill>. A skill needs a SKILL.md whose front matter names it after its folder and
-# describes it. Codex limits the name to 64 characters and the description to 1024.
+# Usage: check_skill <plugin folder> <skill>. A skill needs a SKILL.md with valid YAML front matter that names it after
+# its folder and describes it, both as text. The name is limited to 64 characters and the description to 1024, as the
+# Agent Skills specification (agentskills.io) sets. Codex 0.169 itself loads a skill with a longer description.
 check_skill() {
-  local file="$1/skills/$2/SKILL.md" name description
+  local file="$1/skills/$2/SKILL.md" header name description
   [ -f "$file" ] || { problem "skills/$2 has no SKILL.md."; return; }
-  [ "$(head -n 1 "$file")" = "---" ] || { problem "skills/$2/SKILL.md has no front matter."; return; }
-  name="$(frontmatter_field "$file" name)"
-  description="$(frontmatter_field "$file" description)"
-  [ "$name" = "$2" ] || problem "skills/$2/SKILL.md is named \"$name\", not \"$2\"."
-  [ -n "$description" ] || problem "skills/$2/SKILL.md has no description."
-  check_length "the description of skills/$2" "$description" 1024
+  header="$(read_frontmatter "$file" 2>"$tmp/frontmatter-error")" ||
+    { problem "skills/$2/SKILL.md $(cat "$tmp/frontmatter-error")."; return; }
+  field() { printf '%s' "$header" | jq -r "$1"; }
+  case "$(field '.name | type')" in
+    string)
+      name="$(field .name)"
+      [ "$name" = "$2" ] || problem "skills/$2/SKILL.md is named \"$name\", not \"$2\"."
+      ;;
+    null) problem "skills/$2/SKILL.md has no name." ;;
+    *) problem "skills/$2/SKILL.md has a name that is not text." ;;
+  esac
+  case "$(field '.description | type')" in
+    string)
+      description="$(field .description)"
+      [ -n "$(printf '%s' "$description" | tr -d ' \t\n')" ] || problem "skills/$2/SKILL.md has no description."
+      check_length "the description of skills/$2" "$description" 1024
+      ;;
+    null) problem "skills/$2/SKILL.md has no description." ;;
+    *) problem "skills/$2/SKILL.md has a description that is not text." ;;
+  esac
+  unset -f field
 }
 
 # Usage: check_files <plugin folder>. The package must not hold hooks, MCP or app config, or links.
@@ -341,6 +360,34 @@ dangling_references() {
 # Packing
 # ----------------------------------------------------------------------------------------------------------------------
 
+# Usage: real_path <folder>. Writes the folder's absolute path with links resolved. The folder must exist.
+real_path() {
+  (cd "$1" 2>/dev/null && pwd -P)
+}
+
+# Usage: overlaps <path> <path>. Returns 0 when the paths are the same, or one is inside the other.
+overlaps() {
+  case "$1/" in "$2/"*) return 0 ;; esac
+  case "$2/" in "$1/"*) return 0 ;; esac
+  return 1
+}
+
+# Usage: set_output_path <out folder> <plugin name>. Creates the out folder and sets plugin_dir to the plugin folder's
+# absolute path. Fails when the plugin folder is, holds, or is inside the template or the ai-skills checkout, because
+# assemble deletes it: for example, --out set to the root of this repository. It sets a variable instead of writing the
+# path, because fail in a $(...) would exit only the subshell, and the build would go on with an empty path.
+set_output_path() {
+  local out template source
+  mkdir -p "$1" && out="$(real_path "$1")" || fail "could not create $1."
+  template="$(real_path "$TEMPLATE")" || fail "could not find the template: $TEMPLATE"
+  source="$(real_path "$source_dir")" || fail "could not find the ai-skills checkout: $source_dir"
+  ! overlaps "$out/$2" "$template" ||
+    fail "the output folder $out/$2 would replace the plugin template $template. Choose another --out."
+  ! overlaps "$out/$2" "$source" ||
+    fail "the output folder $out/$2 would replace the ai-skills checkout $source. Choose another --out."
+  plugin_dir="$out/$2"
+}
+
 # Usage: assemble <plugin folder>. Copies the template and the skills into the folder. The template's README.md is for
 # the people who maintain the plugin, so it is left out.
 assemble() {
@@ -379,8 +426,12 @@ main() {
   fetch_source
   check_skill_list
   check_manifest "$TEMPLATE"
+  # The name and version make the output paths, which assemble deletes and pack overwrites, so a bad one, such as
+  # ../infisical-skills, must stop the build before anything is written.
+  report_problems
   [ -z "$version_given" ] || use_version "$version_arg"
-  plugin_dir="$out_dir/$plugin_name"
+  set_output_path "$out_dir" "$plugin_name"
+  [ -n "$plugin_dir" ] || fail "could not work out the output folder."
   assemble "$plugin_dir"
   set_manifest_version "$plugin_dir"
   check_files "$plugin_dir"

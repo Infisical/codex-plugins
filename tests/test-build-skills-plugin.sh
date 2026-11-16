@@ -57,10 +57,18 @@ EOF
   echo "$dir"
 }
 
+# Usage: copy_template <folder>. Copies the real plugin template to the folder, with a fixed name and version, so that
+# the tests don't depend on them: a release raises the version in the real template.
+copy_template() {
+  cp -R "$REPO/infisical-skills" "$1" &&
+    jq '.name = "infisical-skills" | .version = "1.0.0"' "$1/.codex-plugin/plugin.json" >"$1/plugin.json.tmp" &&
+    mv "$1/plugin.json.tmp" "$1/.codex-plugin/plugin.json"
+}
+
 # Usage: new_template. Copies the real plugin template and writes its path.
 new_template() {
   local dir="$WORK/template-$RANDOM$RANDOM"
-  cp -R "$REPO/infisical-skills" "$dir"
+  copy_template "$dir"
   echo "$dir"
 }
 
@@ -249,6 +257,57 @@ printf -- "---\nname: 'infisical-api'\ndescription: \"Quoted.\"\n---\n" >"$SRC/s
 build "$SRC" "$TPL"
 expect "quoted front matter values" 0 "Built"
 
+# Usage: bad_header <description> <SKILL.md content> <text in the error>. Builds with that SKILL.md and expects the
+# build to fail with the text, and to write no ZIP.
+bad_header() {
+  local src
+  src="$(new_source)"
+  printf -- "$2" >"$src/skills/infisical-api/SKILL.md"
+  rm -rf "$WORK/out"
+  build "$src" "$TPL"
+  expect "$1" 1 "$3"
+  check "$1: no ZIP" test ! -e "$WORK/out/infisical-skills-1.0.0.zip"
+}
+
+bad_header "an unterminated quoted description fails" \
+  '---\nname: infisical-api\ndescription: "unterminated\n---\n' "is not valid YAML"
+bad_header "an unterminated single-quoted name fails" \
+  "---\nname: 'infisical-api\ndescription: x\n---\n" "is not valid YAML"
+bad_header "an unclosed list fails" \
+  '---\nname: infisical-api\ndescription: x\ntriggers: [a, b\n---\n' "is not valid YAML"
+bad_header "a bad indentation fails" \
+  '---\nname: infisical-api\n  description: x\n---\n' "is not valid YAML"
+bad_header "a tab indentation fails" \
+  '---\nname: infisical-api\ndescription: x\ntriggers:\n\t- a\n---\n' "is not valid YAML"
+bad_header "front matter without a closing --- fails" \
+  '---\nname: infisical-api\ndescription: x\n\n# Infisical API\n' "has no closing --- after its front matter"
+bad_header "front matter that is a list fails" \
+  '---\n- name: infisical-api\n- description: x\n---\n' "is not a YAML mapping"
+bad_header "empty front matter fails" '---\n---\n# Body\n' "is not a YAML mapping"
+bad_header "a description that is a list fails" \
+  '---\nname: infisical-api\ndescription:\n  - x\n---\n' "has a description that is not text"
+bad_header "a name that is a number fails" '---\nname: 42\ndescription: x\n---\n' "has a name that is not text"
+bad_header "a missing name fails" '---\ndescription: x\n---\n' "has no name"
+bad_header "a blank description fails" '---\nname: infisical-api\ndescription: "  "\n---\n' "has no description"
+bad_header "an empty file fails" '' "has no front matter"
+
+# Valid YAML that a line-by-line reader gets wrong.
+SRC="$(new_source)"
+printf -- '---\r\nname: infisical-api\r\ndescription: Windows line endings.\r\n---\r\n# Body\r\n' \
+  >"$SRC/skills/infisical-api/SKILL.md"
+build "$SRC" "$TPL"
+expect "front matter with Windows line endings" 0 "Built"
+SRC="$(new_source)"
+printf -- '---\nname: infisical-api # the folder name\ndescription: |\n  Two\n  lines.\nupdated: 2026-01-01\n---\n' \
+  >"$SRC/skills/infisical-api/SKILL.md"
+build "$SRC" "$TPL"
+expect "comments, literal blocks, and dates in front matter" 0 "Built"
+SRC="$(new_source)"
+printf -- '---\nname: infisical-api\ndescription: "Uses --- inside a value."\n---\nbody\n---\n' \
+  >"$SRC/skills/infisical-api/SKILL.md"
+build "$SRC" "$TPL"
+expect "a later --- line in the body is not part of the front matter" 0 "Built"
+
 SRC="$(new_source)"
 mkdir -p "$SRC/skills/infisical-api/hooks"
 echo '{}' >"$SRC/skills/infisical-api/.mcp.json"
@@ -304,10 +363,136 @@ printf 'not a png' >"$TPL/assets/icon.png"
 build "$SRC" "$TPL"
 expect "an icon that is not a PNG fails" 1 "is not a PNG file"
 
+# Usage: png <file> <width> <height>. Writes the start of a PNG, up to the size in its IHDR chunk, which is all the
+# check reads.
+png() {
+  local hex i
+  hex="$(printf '%08x%08x' "$2" "$3")"
+  {
+    printf '\x89PNG\r\n\x1a\n\0\0\0\rIHDR'
+    for ((i = 0; i < 16; i += 2)); do printf "\\x${hex:i:2}"; done
+  } >"$1"
+}
+
+for size in 48 4096; do
+  TPL="$(new_template)"
+  png "$TPL/assets/icon.png" "$size" "$size"
+  build "$SRC" "$TPL"
+  expect "a ${size}x$size icon passes" 0 "Built"
+done
+TPL="$(new_template)"
+png "$TPL/assets/icon.png" 4097 4097
+build "$SRC" "$TPL"
+expect "an icon over 4096 pixels fails" 1 "must be 48 to 4096 pixels wide: 4097"
+
+# Only PNG icons are taken, because the build can't check the size of the other formats.
+for icon in logo.jpg logo.jpeg logo.webp logo.svg logo; do
+  TPL="$(new_template)"
+  case "$icon" in
+    *.jpg | *.jpeg) printf '\xff\xd8\xff\xe0\0\x10JFIF\0' >"$TPL/assets/$icon" ;; # The start of a JPEG.
+    *.svg) printf '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="10"/>' >"$TPL/assets/$icon" ;;
+    *) printf 'text' >"$TPL/assets/$icon" ;;
+  esac
+  edit_manifest "$TPL" ".interface.logo = \"./assets/$icon\""
+  build "$SRC" "$TPL"
+  expect "a $icon icon fails" 1 "interface.logo must be a PNG file, the only format this build can check"
+done
+TPL="$(new_template)"
+cp "$TPL/assets/logo.png" "$TPL/assets/logo.jpg"
+edit_manifest "$TPL" '.interface.logo = "./assets/logo.jpg"'
+build "$SRC" "$TPL"
+expect "a PNG named .jpg fails" 1 "interface.logo must be a PNG file"
+TPL="$(new_template)"
+printf 'text, not an image' >"$TPL/assets/logo.png"
+build "$SRC" "$TPL"
+expect "a text file named .png fails" 1 "interface.logo is not a PNG file"
+
 TPL="$(new_template)"
 echo 'not json' >"$TPL/.codex-plugin/plugin.json"
 build "$SRC" "$TPL"
 expect "a manifest that is not JSON fails" 1 "is not a JSON object"
+
+# ----------------------------------------------------------------------------------------------------------------------
+echo "Output paths"
+# ----------------------------------------------------------------------------------------------------------------------
+
+# The build deletes the plugin folder before it fills it, so these lay out a repository like this one, with the template
+# at <root>/infisical-skills, and check that a bad name or --out fails before anything is deleted.
+
+# Usage: new_root. Makes <root>/infisical-skills (the template), <root>/dist, and <root>/ai-skills (the source), and
+# writes the root's path.
+new_root() {
+  local root="$WORK/root-$RANDOM$RANDOM"
+  mkdir -p "$root/dist"
+  copy_template "$root/infisical-skills"
+  cp -R "$(new_source)" "$root/ai-skills"
+  echo keep >"$root/dist/existing.txt"
+  echo "$root"
+}
+
+# Usage: build_in <root> <arguments>. Builds with the root's template and source.
+build_in() {
+  local root="$1"
+  shift
+  OUT="$(PLUGIN_TEMPLATE="$root/infisical-skills" "$BASH_BIN" "$SCRIPT" --source "$root/ai-skills" "$@" 2>&1)"
+  CODE=$?
+}
+
+# Usage: intact <root>. Returns 0 when the template, the source, and the existing output are all still there.
+intact() {
+  [ -f "$1/infisical-skills/.codex-plugin/plugin.json" ] && [ -f "$1/infisical-skills/assets/logo.png" ] &&
+    [ -f "$1/ai-skills/skills/infisical-api/SKILL.md" ] && [ "$(cat "$1/dist/existing.txt" 2>/dev/null)" = keep ]
+}
+
+for name in ../infisical-skills .. "." "a/b" "../ai-skills"; do
+  ROOT="$(new_root)"
+  edit_manifest "$ROOT/infisical-skills" ".name = \"$name\""
+  build_in "$ROOT" --out "$ROOT/dist"
+  expect "the name '$name' fails before anything is written" 1 "name must be"
+  check "the name '$name' leaves the template, the source, and dist alone" intact "$ROOT"
+  check "the name '$name' writes nothing to dist" test "$(ls "$ROOT/dist")" = existing.txt
+done
+
+ROOT="$(new_root)"
+edit_manifest "$ROOT/infisical-skills" '.name = "../infisical-skills" | del(.description)'
+build_in "$ROOT" --out "$ROOT/dist"
+expect "a bad name is reported with the other manifest problems" 1 "2 problem(s)" "name must be" "description is missing"
+check "the template is still there" intact "$ROOT"
+
+ROOT="$(new_root)"
+build_in "$ROOT" --out "$ROOT"
+expect "--out at the template's parent fails" 1 "would replace the plugin template"
+check "--out at the template's parent leaves the template alone" intact "$ROOT"
+
+ROOT="$(new_root)"
+(cd "$ROOT" && PLUGIN_TEMPLATE="$ROOT/infisical-skills" "$BASH_BIN" "$SCRIPT" --source ai-skills --out . >/dev/null 2>&1)
+check "a relative --out . at the root leaves the template alone" intact "$ROOT"
+
+ROOT="$(new_root)"
+build_in "$ROOT" --out "$ROOT/infisical-skills/out"
+expect "--out inside the template fails" 1 "would replace the plugin template"
+check "--out inside the template leaves it alone" intact "$ROOT"
+check "--out inside the template writes nothing in it" test ! -e "$ROOT/infisical-skills/out/infisical-skills"
+
+ROOT="$(new_root)"
+ln -s "$ROOT" "$WORK/link-$RANDOM" && LINK="$(ls -d "$WORK"/link-* | tail -n 1)"
+build_in "$ROOT" --out "$LINK"
+expect "--out through a link to the template's parent fails" 1 "would replace the plugin template"
+check "--out through a link leaves the template alone" intact "$ROOT"
+
+ROOT="$(new_root)"
+mkdir -p "$ROOT/other"
+mv "$ROOT/ai-skills" "$ROOT/other/infisical-skills"
+OUT="$(PLUGIN_TEMPLATE="$ROOT/infisical-skills" "$BASH_BIN" "$SCRIPT" --source "$ROOT/other/infisical-skills" \
+  --out "$ROOT/other" 2>&1)"
+CODE=$?
+expect "an output folder that is the ai-skills checkout fails" 1 "would replace the ai-skills checkout"
+check "the ai-skills checkout is left alone" test -f "$ROOT/other/infisical-skills/skills/infisical-api/SKILL.md"
+
+ROOT="$(new_root)"
+build_in "$ROOT" --out "$ROOT/dist"
+expect "a normal build next to the template works" 0 "Built infisical-skills"
+check "a normal build leaves the template and source alone" intact "$ROOT"
 
 echo
 echo "$passed passed, $failed failed"

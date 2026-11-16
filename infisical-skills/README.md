@@ -16,7 +16,7 @@ scripts/build-skills-plugin.sh --ref <branch|tag|sha>  # skills from another ref
 scripts/build-skills-plugin.sh --source ../ai-skills   # skills from a local checkout, to test a skill change
 ```
 
-It writes `dist/infisical-skills/`, the plugin folder, and `dist/infisical-skills-<version>.zip`, the package to upload. It needs git, jq, and zip.
+It writes `dist/infisical-skills/`, the plugin folder, and `dist/infisical-skills-<version>.zip`, the package to upload. It needs git, jq, zip, and Ruby, which macOS and GitHub's Ubuntu runners include, to parse the skills' YAML front matter.
 
 Before packing, it checks the manifest, icons, and skills against the directory's rules, such as the length limits and no hooks or MCP servers, and fails with a list of every problem. The same input always makes the same ZIP, so you can compare builds by their SHA-256.
 
@@ -61,4 +61,4 @@ To build a release version locally: `scripts/build-skills-plugin.sh --version v1
 
 ## Tests
 
-`tests/test-build-skills-plugin.sh [bash]` tests the build: the ZIP's contents, that it is the same for the same input, and every check the build makes. It builds from a fake ai-skills checkout, so it downloads nothing. It needs git, jq, zip, and unzip. Pass a bash binary to test another version, such as `/bin/bash` (3.2) on macOS.
+`tests/test-build-skills-plugin.sh [bash]` tests the build: the ZIP's contents, that it is the same for the same input, and every check the build makes. It builds from a fake ai-skills checkout, so it downloads nothing. It needs git, jq, zip, unzip, and Ruby. Pass a bash binary to test another version, such as `/bin/bash` (3.2) on macOS.
