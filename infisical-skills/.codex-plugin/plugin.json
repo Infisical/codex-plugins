@@ -1,6 +1,6 @@
 {
   "name": "infisical-skills",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "Skills for working with Infisical, the open-source platform for secrets, certificates, and privileged access. Gives Codex accurate guidance on the Infisical REST API: machine identity authentication, secrets CRUD, projects, identities, pagination, and rate limits.",
   "author": {
     "name": "Infisical",
@@ -13,7 +13,7 @@
   "keywords": ["infisical", "secrets", "secrets-management", "api", "machine-identity"],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Infisical",
+    "displayName": "Infisical Skills",
     "shortDescription": "Work with Infisical",
     "longDescription": "Skills that help Codex work with Infisical, the open-source platform for secrets, certificates, and privileged access, using current, accurate guidance instead of guesses.\n\nInfisical API: authenticate with a machine identity, create, read, update, and delete secrets with the v4 endpoints, run batch operations, and manage projects, environments, folders, and identities. Covers pagination and rate limits, for Infisical Cloud and self-hosted instances.",
     "developerName": "Infisical",
