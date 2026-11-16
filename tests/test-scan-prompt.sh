@@ -26,8 +26,18 @@ failures=()
 # Helpers
 # ----------------------------------------------------------------------------------------------------------------------
 
+# Usage: random_chars <tr set> <length>. Reads random bytes in rounds instead of cutting off an endless stream, so tr
+# never writes to a closed pipe, which GNU tr reports when SIGPIPE is ignored, as on GitHub's runners.
+random_chars() {
+  local chars=""
+  while [ "${#chars}" -lt "$2" ]; do
+    chars="$chars$(head -c $(($2 * 12 + 256)) /dev/urandom | LC_ALL=C tr -dc "$1")"
+  done
+  printf '%s' "${chars:0:$2}"
+}
+
 random_alnum() {
-  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"
+  random_chars 'A-Za-z0-9' "$1"
 }
 
 github_token() {
@@ -123,10 +133,11 @@ ok() {
 }
 
 fail() {
+  local stdout="${STDOUT:-}" stderr="${ERR:-}"
   failed=$((failed + 1))
   failures+=("$1")
   printf '  FAIL  %s\n        result=%s code=%s seconds=%s\n        stdout: %s\n        stderr: %s\n' "$1" \
-    "${RESULT:-}" "${CODE:-}" "${SECONDS_TAKEN:-}" "$(printf '%s' "${STDOUT:-}" | head -c 600)" "$(printf '%s' "${ERR:-}" | head -c 600)"
+    "${RESULT:-}" "${CODE:-}" "${SECONDS_TAKEN:-}" "${stdout:0:600}" "${stderr:0:600}"
 }
 
 # Usage: check <name> <command...>. Passes when the command succeeds.
@@ -205,7 +216,7 @@ run_hook "const token = \"$GH1\"; // GitLeaks:Allow"
 expect "a gitleaks:allow comment in another case doesn't hide a secret" block "github-pat"
 
 markers="TOKEN=$(github_token)
-$(yes 'x gitleaks:allow' | head -n 27000)"
+$(awk 'BEGIN { for (i = 0; i < 27000; i++) print "x gitleaks:allow" }')"
 run_hook "$markers"
 expect "a secret before 27000 gitleaks:allow comments is blocked" block "github-pat"
 check "and is done in under 15 seconds" took_less_than 15
@@ -215,7 +226,7 @@ expect "a secret before 150000 spaces is blocked" block "github-pat"
 check "and is done in under 15 seconds" took_less_than 15
 
 echo "Large prompts"
-big="$(head -c 1500000 /dev/urandom | LC_ALL=C tr -dc 'a-z ' | head -c 1000000)"
+big="$(random_chars 'a-z ' 1000000)"
 run_hook "$big"
 expect "1 MB clean prompt passes" pass
 check "1 MB prompt scans in under 15 seconds" took_less_than 15

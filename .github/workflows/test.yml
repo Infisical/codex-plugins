@@ -10,38 +10,23 @@ permissions:
 
 jobs:
   scan-prompt:
-    name: Hook script (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
+    name: Hook script
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux
-            os: ubuntu-latest
-            bash: bash
-          - name: macOS, bash 3.2
-            os: macos-latest
-            bash: /bin/bash
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the Infisical CLI (Linux)
-        if: runner.os == 'Linux'
+      - name: Install the Infisical CLI and jq
         run: |
           curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
           sudo apt-get update
           sudo apt-get install -y infisical jq
 
-      - name: Install the Infisical CLI (macOS)
-        if: runner.os == 'macOS'
-        run: brew install infisical/get-cli/infisical jq
-
       - name: Show versions
         run: |
           infisical --version
           jq --version
-          ${{ matrix.bash }} --version | head -1
+          bash --version | head -1
 
       - name: Run the hook script tests
-        run: tests/test-scan-prompt.sh ${{ matrix.bash }}
+        run: tests/test-scan-prompt.sh

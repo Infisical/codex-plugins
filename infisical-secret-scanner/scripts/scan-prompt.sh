@@ -111,6 +111,12 @@ sha256() {
   fi | cut -d ' ' -f 1
 }
 
+# Usage: jq_true <jq arguments>. Returns 0 only when jq prints exactly true. jq -e can't be trusted for this: jq 1.6, still
+# in Debian 12, exits 0 when the filter prints nothing, such as on an empty file.
+jq_true() {
+  [ "$(jq "$@" 2>/dev/null)" = true ]
+}
+
 # Usage: require_tools. Blocks when a tool or file the hook needs is missing.
 require_tools() {
   command -v infisical >/dev/null 2>&1 ||
@@ -166,7 +172,7 @@ scan_to_report() {
     "$LEAK_EXIT_CODE") ;;
     *) block "Infisical: the secret scan failed (exit code $status), so the prompt was not sent. Run 'infisical scan --pipe --config $SCAN_CONFIG' to see the error, and update the Infisical CLI if it is out of date." ;;
   esac
-  jq -e 'type == "array" and all(.[]; type == "object" and (.Secret | type == "string"))' "$2" >/dev/null 2>&1 ||
+  jq_true 'type == "array" and all(.[]; type == "object" and (.Secret | type == "string"))' "$2" ||
     block "$REPORT_ERROR"
 }
 
@@ -224,13 +230,13 @@ describe_secrets() {
 # Saves the prompt to $tmp/prompt.txt from the hook input in $tmp/input.json. Blocks when there is no prompt to scan,
 # because an input without one would otherwise be scanned as an empty prompt and sent.
 read_prompt() {
-  jq -e '.prompt | type == "string"' "$tmp/input.json" >/dev/null 2>&1 &&
+  jq_true '.prompt | type == "string"' "$tmp/input.json" &&
     jq -j '.prompt' "$tmp/input.json" >"$tmp/prompt.txt" || block "$READ_ERROR"
 }
 
 # Returns 0 when the prompt comes from a subagent. Codex writes those prompts from what the model asked for.
 is_subagent_prompt() {
-  jq -e '.agent_id // empty' "$tmp/input.json" >/dev/null 2>&1
+  jq_true '.agent_id // false | . != false' "$tmp/input.json"
 }
 
 # Saves the user's request to $tmp/request.txt: the prompt without the IDE context and without leading whitespace.
@@ -246,8 +252,8 @@ read_request() {
 # because it starts with $. Trailing whitespace is found by walking back from the end, because a regex is slow on a
 # long run of it.
 command_value() {
-  jq -Rse --arg command "$1" 'startswith($command) and (.[($command | length):] | test("\\A(\\s|\\z)"))' \
-    "$tmp/request.txt" >/dev/null 2>&1 || return 1
+  jq_true -Rs --arg command "$1" 'startswith($command) and (.[($command | length):] | test("\\A(\\s|\\z)"))' \
+    "$tmp/request.txt" || return 1
   jq -Rsj --arg command "$1" '
     .[($command | length):] | sub("\\A\\s+"; "") | explode as $chars |
     ([first(range(($chars | length) - 1; -1; -1) | select([$chars[.]] | inside([9, 10, 11, 12, 13, 32]) | not))] |
@@ -276,8 +282,8 @@ check_value() {
   [ "$count" -le 1 ] ||
     block "Infisical: the value holds $count secrets. Allow or disallow one secret at a time. Nothing was changed."
   # Any line break, including the Unicode ones, ends the line.
-  jq -Rse 'test("[\n\r\u000b\f\u0085\u2028\u2029]") | not' "$1" >/dev/null 2>&1 && return 0
-  [ "$count" -eq 1 ] && jq -e --rawfile value "$1" '.[0].Secret == $value' "$tmp/value-report.json" >/dev/null 2>&1 ||
+  jq_true -Rs 'test("[\n\r\u000b\f\u0085\u2028\u2029]") | not' "$1" && return 0
+  [ "$count" -eq 1 ] && jq_true --rawfile value "$1" '.[0].Secret == $value' "$tmp/value-report.json" ||
     block "Infisical: put only the secret after the command, on the same line, and send nothing else with it. Nothing was changed."
 }
 

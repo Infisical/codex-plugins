@@ -23,8 +23,18 @@ passed=0
 failed=0
 failures=()
 
+# Usage: random_chars <tr set> <length>. Reads random bytes in rounds instead of cutting off an endless stream, so tr
+# never writes to a closed pipe, which GNU tr reports when SIGPIPE is ignored, as on GitHub's runners.
+random_chars() {
+  local chars=""
+  while [ "${#chars}" -lt "$2" ]; do
+    chars="$chars$(head -c $(($2 * 12 + 256)) /dev/urandom | LC_ALL=C tr -dc "$1")"
+  done
+  printf '%s' "${chars:0:$2}"
+}
+
 random_alnum() {
-  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"
+  random_chars 'A-Za-z0-9' "$1"
 }
 
 GH1="ghp_$(random_alnum 36)"
