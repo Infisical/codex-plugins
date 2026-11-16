@@ -3,10 +3,11 @@
 # adds the skills listed in SKILLS from the Infisical/ai-skills repository, checks the result against the rules for
 # submitting a plugin to the OpenAI plugin directory, and packs it as a ZIP.
 #
-# Usage: scripts/build-skills-plugin.sh [--ref <git ref>] [--source <ai-skills folder>] [--out <folder>]
-#   --ref     branch, tag, or commit of ai-skills to take the skills from (default: main)
-#   --source  a local ai-skills checkout to use instead of downloading one, to test changes to a skill
-#   --out     where to write the plugin folder and the ZIP (default: dist)
+# Usage: scripts/build-skills-plugin.sh [--ref <git ref>] [--source <ai-skills folder>] [--out <folder>] [--version <v>]
+#   --ref      branch, tag, or commit of ai-skills to take the skills from (default: main)
+#   --source   a local ai-skills checkout to use instead of downloading one, to test changes to a skill
+#   --out      where to write the plugin folder and the ZIP (default: dist)
+#   --version  the plugin version, as a release tag such as v1.2.0 (default: the version in the template's manifest)
 #
 # It writes <out>/infisical-skills/, the plugin folder, which can be installed in Codex to test it, and
 # <out>/infisical-skills-<version>.zip, the package to upload. The ZIP is the same for the same template and skills, so
@@ -24,9 +25,9 @@ set -o pipefail
 # Settings
 # ----------------------------------------------------------------------------------------------------------------------
 
-# The skills from ai-skills/skills/ that go into the plugin, by folder name. To ship a new skill, add it here, update the
-# description and longDescription in infisical-skills/.codex-plugin/plugin.json if they list what the plugin covers, and
-# raise the version there.
+# The skills from ai-skills/skills/ that go into the plugin, by folder name. To ship a new skill, add it here, and update
+# the description and longDescription in infisical-skills/.codex-plugin/plugin.json if they list what the plugin covers.
+# A release sets the version from its tag.
 readonly SKILLS=(
   infisical-api
 )
@@ -43,6 +44,8 @@ readonly FILE_TIME="198001010000"
 ref="main"
 source_dir=""
 out_dir="$REPO_ROOT/dist"
+version_arg=""
+version_given=""
 
 # A temporary folder for the download. Removed on exit.
 tmp=""
@@ -62,7 +65,7 @@ fail() {
 }
 
 usage() {
-  sed -n '6,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+  sed -n '6,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -87,6 +90,7 @@ parse_args() {
       --ref) [ $# -ge 2 ] || usage; ref="$2"; shift ;;
       --source) [ $# -ge 2 ] || usage; source_dir="$2"; shift ;;
       --out) [ $# -ge 2 ] || usage; out_dir="$2"; shift ;;
+      --version) [ $# -ge 2 ] || usage; version_arg="$2"; version_given=1; shift ;;
       -h | --help) usage ;;
       *) usage ;;
     esac
@@ -247,6 +251,20 @@ check_manifest() {
   unset -f jq_field
 }
 
+# Usage: use_version <release tag>. Sets version from a release tag such as v1.2.0, or fails.
+use_version() {
+  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "--version must be a release tag such as v1.2.0: $1"
+  version="${1#v}"
+}
+
+# Usage: set_manifest_version <plugin folder>. Writes version into the plugin's manifest, when --version changed it.
+set_manifest_version() {
+  local manifest="$1/.codex-plugin/plugin.json"
+  [ "$(jq -r .version "$manifest")" = "$version" ] && return
+  jq --arg v "$version" '.version = $v' "$manifest" >"$manifest.tmp" && mv "$manifest.tmp" "$manifest" ||
+    fail "could not set the version in $manifest."
+}
+
 # Usage: check_skill <plugin folder> <skill>. A skill needs a SKILL.md whose front matter names it after its folder and
 # describes it. Codex limits the name to 64 characters and the description to 1024.
 check_skill() {
@@ -361,8 +379,10 @@ main() {
   fetch_source
   check_skill_list
   check_manifest "$TEMPLATE"
+  [ -z "$version_given" ] || use_version "$version_arg"
   plugin_dir="$out_dir/$plugin_name"
   assemble "$plugin_dir"
+  set_manifest_version "$plugin_dir"
   check_files "$plugin_dir"
   for skill in "${SKILLS[@]}"; do
     [ -d "$plugin_dir/skills/$skill" ] && check_skill "$plugin_dir" "$skill"

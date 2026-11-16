@@ -181,6 +181,28 @@ build "$SRC3" "$TPL"
 expect "warns when an included skill points to a skill that is not included" 0 \
   "warning: these skills point to skills that are not in the plugin" "  infisical-api: other-skill"
 
+# --version takes a release tag, and the ZIP's manifest gets its version. The template keeps its own.
+GITHUB_OUTPUT="$WORK/github-output" build "$SRC" "$TPL" --version v2.3.4
+expect "--version v2.3.4 builds version 2.3.4" 0 "Built infisical-skills 2.3.4" "infisical-skills-2.3.4.zip"
+ZIP="$WORK/out/infisical-skills-2.3.4.zip"
+OUT="$(unzip -p "$ZIP" .codex-plugin/plugin.json)"
+check "the manifest in the ZIP has the version" test "$(printf '%s' "$OUT" | jq -r .version)" = 2.3.4
+check "the rest of the manifest is the template's" \
+  test "$(printf '%s' "$OUT" | jq -S 'del(.version)')" = "$(jq -S 'del(.version)' "$TPL/.codex-plugin/plugin.json")"
+check "the template keeps its version" test "$(jq -r .version "$TPL/.codex-plugin/plugin.json")" = 1.0.0
+OUT="$(cat "$WORK/github-output")"
+check "the GitHub outputs have the version" bash -c 'printf "%s" "$1" | grep -qx "version=2.3.4"' _ "$OUT"
+build "$SRC" "$TPL" --version v1.0.0
+check "--version equal to the template's keeps the manifest byte for byte" \
+  bash -c 'unzip -p "$1" .codex-plugin/plugin.json | cmp -s - "$2/.codex-plugin/plugin.json"' _ \
+  "$WORK/out/infisical-skills-1.0.0.zip" "$TPL"
+for tag in 1.2.3 infisical-skills-v1.2.3 v1.2 v1.2.3-beta V1.2.3 latest ""; do
+  build "$SRC" "$TPL" --version "$tag"
+  expect "--version '$tag' fails" 1 "--version must be a release tag such as v1.2.0"
+done
+build "$SRC" "$TPL" --version
+expect "--version without a value shows the usage" 2 "Usage:"
+
 build "$SRC" "$TPL" --bogus
 expect "an unknown option shows the usage" 2 "Usage:"
 build "$WORK/nowhere" "$TPL"

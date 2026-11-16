@@ -25,8 +25,9 @@ The summary lists the ai-skills skills that aren't in the plugin yet. It warns w
 ## Add a skill
 
 1. Add the skill's folder name from `ai-skills/skills/` to `SKILLS` at the top of [`scripts/build-skills-plugin.sh`](../scripts/build-skills-plugin.sh).
-2. In [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json), add the skill to `description` and `interface.longDescription`, and raise `version`.
+2. In [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json), add the skill to `description` and `interface.longDescription`.
 3. Update the list of released skills at the top of this README.
+4. [Release](#release) a new version.
 
 ## Test in Codex
 
@@ -48,11 +49,15 @@ codex
 
 ## Release
 
-1. Raise `version` in [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) and merge it.
-2. Push a tag `infisical-skills-v<version>`. The [release workflow](../.github/workflows/release-skills-plugin.yml) builds the ZIP from ai-skills main, checks that the tag matches the version, and publishes a GitHub release with the ZIP. The release notes record the ai-skills commit the skills came from.
-3. Upload the ZIP from the release to the OpenAI plugin dashboard.
+1. In GitHub, go to Releases, then Draft a new release. Create a tag `vX.Y.Z` on `main`, where `X.Y.Z` is a [semantic version](https://semver.org) with all three numbers, such as `v1.2.0`. Raise X (major) for changes that break how people use the plugin, such as removing a skill, Y (minor) for new skills or features, and Z (patch) for fixes to existing skills. Pre-release and build suffixes, such as `v1.2.0-beta`, aren't accepted. Write the notes and publish the release.
+2. The [release workflow](../.github/workflows/release-skills-plugin.yml) builds the plugin from ai-skills main, with the tag's version in its manifest, and attaches `infisical-skills-<version>.zip` to the release. It adds the ai-skills commit the skills came from and the ZIP's SHA-256 to the end of the release notes. A tag in any other form, such as `1.2.0`, `v1.2.0-beta`, or `latest`, fails the workflow, and nothing is attached.
+3. Download the ZIP from the release's assets and upload it to the OpenAI plugin dashboard.
 
-To build a ZIP without releasing, for example from an ai-skills branch, run the workflow by hand from the Actions tab and download the ZIP from the run's artifacts.
+The version in [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json) is only used by local builds. A release always uses its tag.
+
+To build a ZIP without releasing, for example from an ai-skills branch, run the workflow by hand from the Actions tab, optionally with a version, and download the ZIP from the run's artifacts.
+
+To build a release version locally: `scripts/build-skills-plugin.sh --version v1.2.0`.
 
 ## Tests
 
