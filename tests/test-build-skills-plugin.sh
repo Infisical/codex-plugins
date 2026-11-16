@@ -352,6 +352,51 @@ bad_manifest "a missing icon file fails" '.interface.composerIcon = "./assets/no
 bad_manifest "a skills path other than ./skills/ fails" '.skills = "./other/"' "skills must be ./skills/"
 bad_manifest "several problems are all reported" 'del(.description) | .version = "x"' "2 problem(s)"
 
+# A field that holds an object or a list instead of text fails, with one problem that names the field, and no ZIP. jq -r
+# turns {} and [] into nonempty text, so these passed the content checks before the types were checked.
+# Usage: not_text <jq path> <value>.
+not_text() {
+  local tpl
+  tpl="$(new_template)"
+  edit_manifest "$tpl" "$1 = $2"
+  build "$SRC" "$tpl"
+  expect "$1 = $2 fails" 1 "1 problem(s)" "${1#.} must be"
+  check "$1 = $2 writes no ZIP" test -z "$(ls "$WORK/out"/*.zip 2>/dev/null)"
+}
+
+not_text .description '{}'
+not_text .interface.displayName '[]'
+not_text .name 42
+not_text .version 1
+not_text .skills '["./skills/"]'
+not_text .author.name '{}'
+not_text .author.email 'false'
+not_text .author.url '{"url": "https://infisical.com"}'
+not_text .homepage '[]'
+not_text .repository '{}'
+not_text .license '["MIT"]'
+not_text .interface.shortDescription '{}'
+not_text .interface.longDescription '[]'
+not_text .interface.developerName 7
+not_text .interface.category '[]'
+not_text .interface.websiteURL '["https://infisical.com"]'
+not_text .interface.supportURL '{}'
+not_text .interface.composerIcon '["./assets/icon.png"]'
+not_text .interface.logo '{"a": 1}'
+not_text .author '"Infisical"'
+not_text .interface '"Infisical"'
+not_text .interface '[]'
+bad_manifest "keywords that aren't a list of text fail" '.keywords = "secrets"' "keywords must be a list of text"
+bad_manifest "an empty description fails" '.description = ""' "description is empty"
+bad_manifest "an empty display name fails" '.interface.displayName = ""' "interface.displayName is empty"
+bad_manifest "a missing interface fails" 'del(.interface)' "interface is missing"
+bad_manifest "a missing author fails" 'del(.author)' "author is missing"
+TPL="$(new_template)"
+edit_manifest "$TPL" 'del(.homepage, .repository, .license, .keywords, .author.email, .author.url, .interface.websiteURL,
+  .interface.privacyPolicyURL, .interface.termsOfServiceURL, .interface.defaultPrompt)'
+build "$SRC" "$TPL"
+expect "optional fields can be left out" 0 "Built"
+
 TPL="$(new_template)"
 printf '\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x40\0\0\0\x20' >"$TPL/assets/icon.png"
 build "$SRC" "$TPL"

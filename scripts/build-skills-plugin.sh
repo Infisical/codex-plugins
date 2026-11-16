@@ -207,51 +207,96 @@ check_icon() {
 }
 
 # Usage: check_manifest <plugin folder>. Checks .codex-plugin/plugin.json against the fields that the plugin directory
-# requires, and sets plugin_name and version.
+# requires, and sets plugin_name and version. Each field's JSON type is checked before its contents: jq -r turns an
+# object or a list into text, so {} would otherwise pass as a description.
 check_manifest() {
-  local manifest="$1/.codex-plugin/plugin.json" field
+  local manifest="$1/.codex-plugin/plugin.json" field value
   jq -e 'type == "object"' "$manifest" >/dev/null 2>&1 || fail "$manifest is not a JSON object."
-  jq_field() { jq -r "$1 // \"\"" "$manifest"; }
 
-  plugin_name="$(jq_field .name)"
-  version="$(jq_field .version)"
-  [[ "$plugin_name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ "${#plugin_name}" -le 64 ] ||
-    problem "name must be at most 64 lowercase letters, numbers, and single hyphens: $plugin_name"
-  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "version must be a version such as 1.0.0: $version"
-  [ -n "$(jq_field .description)" ] || problem "description is missing."
-  check_length description "$(jq_field .description)" 4000
-  [ -n "$(jq_field .author.name)" ] || problem "author.name is missing."
-  check_length author.name "$(jq_field .author.name)" 120
-  check_https author.url "$(jq_field .author.url)"
-  check_https homepage "$(jq_field .homepage)"
-  [ "$(jq_field .skills)" = "./skills/" ] || problem "skills must be ./skills/."
+  # Usage: json_type <path>. Writes the JSON type at the path, or "unreachable" when a parent isn't an object.
+  json_type() { jq -r "try ($1 | type) catch \"unreachable\"" "$manifest"; }
+
+  # Usage: object <path>. Records a problem unless the path holds an object. Returns 1 when it doesn't.
+  object() {
+    case "$(json_type "$1")" in
+      object) return 0 ;;
+      null) problem "${1#.} is missing." ;;
+      *) problem "${1#.} must be an object." ;;
+    esac
+    return 1
+  }
+
+  # Usage: text <path> <required|optional> [max length]. Sets value to the text at the path, and returns 0 when the
+  # field holds nonempty text. Records a problem when a required field is missing or empty, or when the field holds
+  # anything but text. Returns 1 without a problem for a missing optional field, or one under a parent that isn't an
+  # object, which object has reported.
+  text() {
+    value=""
+    case "$(json_type "$1")" in
+      string)
+        value="$(jq -r "$1" "$manifest")"
+        if [ -z "$value" ]; then
+          [ "$2" = optional ] || problem "${1#.} is empty."
+          return 1
+        fi
+        [ -z "${3:-}" ] || check_length "${1#.}" "$value" "$3"
+        return 0
+        ;;
+      null) [ "$2" = optional ] || problem "${1#.} is missing." ;;
+      unreachable) ;;
+      *) problem "${1#.} must be text, not $(json_type "$1")." ;;
+    esac
+    return 1
+  }
+
+  plugin_name=""
+  version=""
+  if text .name required; then
+    plugin_name="$value"
+    [[ "$plugin_name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] && [ "${#plugin_name}" -le 64 ] ||
+      problem "name must be at most 64 lowercase letters, numbers, and single hyphens: $plugin_name"
+  fi
+  if text .version required; then
+    version="$value"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || problem "version must be a version such as 1.0.0: $version"
+  fi
+  text .description required 4000
+  if object .author; then
+    text .author.name required 120
+    text .author.email optional 320
+    text .author.url optional 2048 && check_https author.url "$value"
+  fi
+  text .homepage optional 2048 && check_https homepage "$value"
+  text .repository optional
+  text .license optional
+  [ "$(jq '.keywords // [] | type == "array" and all(.[]; type == "string")' "$manifest")" = true ] ||
+    problem "keywords must be a list of text."
+  if text .skills required; then
+    [ "$value" = "./skills/" ] || problem "skills must be ./skills/."
+  fi
 
   # A package with any of these can't be submitted, or isn't a skills-only plugin.
   for field in hooks mcpServers apps; do
     [ "$(jq "has(\"$field\")" "$manifest")" = false ] || problem "the manifest has $field, which a skills-only plugin can't have."
   done
 
-  for field in displayName shortDescription; do
-    [ -n "$(jq_field ".interface.$field")" ] || problem "interface.$field is missing."
-    check_length "interface.$field" "$(jq_field ".interface.$field")" 30
-  done
-  [ -n "$(jq_field .interface.longDescription)" ] || problem "interface.longDescription is missing."
-  check_length interface.longDescription "$(jq_field .interface.longDescription)" 4000
-  [ -n "$(jq_field .interface.developerName)" ] || problem "interface.developerName is missing."
-  check_length interface.developerName "$(jq_field .interface.developerName)" 80
-  [ -n "$(jq_field .interface.category)" ] || problem "interface.category is missing."
+  object .interface || { unset -f json_type object text; return; }
+  text .interface.displayName required 30
+  text .interface.shortDescription required 30
+  text .interface.longDescription required 4000
+  text .interface.developerName required 80
+  text .interface.category required
   [ "$(jq '.interface.capabilities | type == "array" and length <= 20 and all(.[]; type == "string" and length <= 120)' \
     "$manifest")" = true ] || problem "interface.capabilities must be a list of at most 20 strings of at most 120 characters."
   [ "$(jq '.interface.defaultPrompt // [] | (if type == "string" then [.] else . end)
     | type == "array" and length <= 3 and all(.[]; type == "string" and length <= 128) and (unique | length) == length' \
     "$manifest")" = true ] || problem "interface.defaultPrompt must be at most 3 different prompts of at most 128 characters."
   for field in websiteURL supportURL privacyPolicyURL termsOfServiceURL; do
-    check_https "interface.$field" "$(jq_field ".interface.$field")"
-    check_length "interface.$field" "$(jq_field ".interface.$field")" 1024
+    text ".interface.$field" optional 1024 && check_https "interface.$field" "$value"
   done
-  check_icon "$1" composerIcon "$(jq_field .interface.composerIcon)"
-  check_icon "$1" logo "$(jq_field .interface.logo)"
-  unset -f jq_field
+  text .interface.composerIcon required && check_icon "$1" composerIcon "$value"
+  text .interface.logo required && check_icon "$1" logo "$value"
+  unset -f json_type object text
 }
 
 # Usage: use_version <release tag>. Sets version from a release tag such as v1.2.0, or fails.
