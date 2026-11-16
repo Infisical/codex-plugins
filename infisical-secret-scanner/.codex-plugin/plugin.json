@@ -1,0 +1,29 @@
+{
+  "name": "infisical-secret-scanner",
+  "version": "1.0.0",
+  "description": "Blocks Codex prompts that contain secrets. Scans every prompt locally with the Infisical CLI; nothing is sent to Infisical.",
+  "author": {
+    "name": "Infisical",
+    "email": "support@infisical.com",
+    "url": "https://infisical.com"
+  },
+  "homepage": "https://infisical.com",
+  "repository": "https://github.com/Infisical/codex-plugins",
+  "license": "MIT",
+  "keywords": ["secrets", "secret-scanning", "security"],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Infisical Secret Scanner",
+    "shortDescription": "Block prompts that contain secrets",
+    "longDescription": "Scans every prompt on your machine with the Infisical CLI before it is sent, and blocks prompts that contain API keys, tokens, private keys, and other secrets. Nothing is sent to Infisical. After you install it, run /hooks and trust its hook: the plugin does nothing until you do, and Codex asks again after each update.",
+    "developerName": "Infisical",
+    "category": "Security",
+    "capabilities": ["Read"],
+    "websiteURL": "https://infisical.com",
+    "privacyPolicyURL": "https://infisical.com/privacy",
+    "termsOfServiceURL": "https://infisical.com/terms",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
+  }
+}

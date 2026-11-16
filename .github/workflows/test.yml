@@ -4,10 +4,29 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  hello:
+  scan-prompt:
+    name: Hook script
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - run: echo "Hello, world!"
+      - uses: actions/checkout@v4
+
+      - name: Install the Infisical CLI and jq
+        run: |
+          curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | sudo -E bash
+          sudo apt-get update
+          sudo apt-get install -y infisical jq
+
+      - name: Show versions
+        run: |
+          infisical --version
+          jq --version
+          bash --version | head -1
+
+      - name: Run the hook script tests
+        run: tests/test-scan-prompt.sh

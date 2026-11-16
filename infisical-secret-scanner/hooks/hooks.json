@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$PLUGIN_ROOT/scripts/scan-prompt.sh\"",
+            "timeout": 60,
+            "statusMessage": "Scanning the prompt for secrets"
+          }
+        ]
+      }
+    ]
+  }
+}
