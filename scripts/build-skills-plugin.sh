@@ -161,7 +161,7 @@ fetch_source() {
   fi
   source_dir="$tmp/ai-skills"
   git init -q "$source_dir" &&
-    git -C "$source_dir" fetch -q --depth 1 "$SOURCE_REPO" "$ref" &&
+    git -C "$source_dir" fetch -q --depth 1 -- "$SOURCE_REPO" "$ref" &&
     git -C "$source_dir" -c advice.detachedHead=false checkout -q FETCH_HEAD ||
     fail "could not download $ref from $SOURCE_REPO."
   source_commit="$(git -C "$source_dir" rev-parse HEAD)"
