@@ -1,0 +1,90 @@
+name: Release skills plugin
+
+# Builds the infisical-skills plugin ZIP from Infisical/ai-skills.
+#
+# - Run it by hand (Actions > Release skills plugin > Run workflow) to build the ZIP from any ai-skills ref and download
+#   it from the run's artifacts, without releasing anything.
+# - Push a tag infisical-skills-v<version>, where <version> is the version in infisical-skills/.codex-plugin/plugin.json,
+#   to build from ai-skills main and publish a GitHub release with the ZIP. The release notes record the ai-skills
+#   commit the skills came from.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ai_skills_ref:
+        description: Branch, tag, or commit of Infisical/ai-skills to take the skills from
+        default: main
+        required: true
+  push:
+    tags:
+      - "infisical-skills-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      zip: ${{ steps.build.outputs.zip }}
+      version: ${{ steps.build.outputs.version }}
+      source_commit: ${{ steps.build.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test the build script
+        run: tests/test-build-skills-plugin.sh
+
+      - name: Build the plugin
+        id: build
+        env:
+          AI_SKILLS_REF: ${{ inputs.ai_skills_ref || 'main' }}
+        run: scripts/build-skills-plugin.sh --ref "$AI_SKILLS_REF"
+
+      - name: Check that the tag matches the plugin version
+        if: github.event_name == 'push'
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "infisical-skills-v$VERSION" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME, but the plugin version is $VERSION. Tag infisical-skills-v$VERSION, or change the version in infisical-skills/.codex-plugin/plugin.json."
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infisical-skills-${{ steps.build.outputs.version }}
+          path: ${{ steps.build.outputs.zip }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: infisical-skills-${{ needs.build.outputs.version }}
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.build.outputs.source_commit }}
+        run: |
+          zip="infisical-skills-$VERSION.zip"
+          {
+            echo "Infisical skills plugin for Codex, version $VERSION."
+            echo
+            echo "Skills from https://github.com/Infisical/ai-skills/tree/$SOURCE_COMMIT"
+            echo
+            echo "SHA-256 of $zip: \`$(sha256sum "$zip" | cut -d ' ' -f 1)\`"
+          } >notes.md
+          gh release create "$GITHUB_REF_NAME" "$zip" --repo "$GITHUB_REPOSITORY" \
+            --title "infisical-skills $VERSION" --notes-file notes.md
