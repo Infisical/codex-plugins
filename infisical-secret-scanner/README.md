@@ -69,6 +69,8 @@ $infisical-secret-scanner:disallow <secret>
 
 `$infisical-disallow <secret>` is a shorter name for it. The hook handles this command the same way, so the value is never sent to the model. Pass the same value, quoted value, or line that you passed to allow.
 
+The command must be at the start of your prompt. A command later in the prompt, such as in text you pasted, is scanned like any other text. With IDE context on, it must be at the start of your request, after the context Codex adds.
+
 Only a prompt you type can allow or disallow a secret. When Codex sends a prompt to a subagent, the model wrote it, so the plugin scans a command in it like any other text.
 
 ## Scan rules

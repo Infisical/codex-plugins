@@ -11,7 +11,8 @@
 #   anything else             the hook failed, and Codex SENDS the prompt
 # Codex also sends the prompt when the hook takes longer than its timeout (60 seconds in hooks.json). So every failure
 # in this script must end in block, the check runs in a worker that is killed at a deadline under that timeout, and an
-# unexpected exit is turned into a block.
+# unexpected exit is turned into a block. Removing temporary folders, at the start and at the end, has a time limit too,
+# so that a slow disk can't hold the hook past that timeout.
 #
 # The script blocks with exit code 2 and never writes to stdout. Codex runs hooks in the user's shell, which can print
 # to stdout before the script starts (for example from ~/.zshenv), and Codex reads stdout that isn't a JSON object as
@@ -29,7 +30,8 @@ set -o pipefail
 # the $ menu; the second is a shorter name to type.
 readonly ALLOW_COMMANDS=('$infisical-secret-scanner:allow' '$infisical-allow')
 readonly DISALLOW_COMMANDS=('$infisical-secret-scanner:disallow' '$infisical-disallow')
-# With IDE context on, Codex puts the context before the user's request, and this line between them.
+# With IDE context on, Codex sends "<IDE_HEADER><context>\n<REQUEST_MARKER>\n<request>".
+readonly IDE_HEADER='# Context from my IDE setup:'
 readonly REQUEST_MARKER='## My request for Codex:'
 readonly LEAK_EXIT_CODE=42
 # The most findings listed in a message. The rest are counted.
@@ -45,6 +47,10 @@ case "${INFISICAL_SCAN_TIMEOUT:-}" in
 esac
 [ "${#RUN_SECONDS}" -le 2 ] && [ "$RUN_SECONDS" -le "$MAX_RUN_SECONDS" ] || RUN_SECONDS="$MAX_RUN_SECONDS"
 readonly RUN_SECONDS
+# Seconds the hook waits for each removal of temporary folders: old ones at the start, and its own at the end. The
+# deadline counts from the start, so the start's removal is part of RUN_SECONDS, and the longest run is RUN_SECONDS plus
+# this, 50 seconds.
+readonly CLEANUP_SECONDS=5
 
 # Codex gives plugin hooks PLUGIN_ROOT, the plugin's installed folder, and PLUGIN_DATA, a folder for the plugin's data
 # that is kept across plugin updates. It also sets CLAUDE_PLUGIN_ROOT and CLAUDE_PLUGIN_DATA to the same values. When
@@ -71,6 +77,8 @@ readonly REPORT_ERROR="Infisical: could not read the secret scan report, so the 
 SCAN_CONFIG=""
 # A private temporary folder for the input, the prompt, values, and scan reports. Removed on exit.
 tmp=""
+# The SECONDS value at which the check is stopped and the prompt blocked. Set first thing in main.
+deadline=""
 # Set once the decision is written, so the exit trap doesn't write a second one.
 decided=""
 
@@ -92,7 +100,7 @@ block() {
 # such as a bash error, into a block, because Codex would send the prompt.
 on_exit() {
   local status=$?
-  [ -n "$tmp" ] && rm -rf "$tmp"
+  [ -n "$tmp" ] && run_for "$CLEANUP_SECONDS" rm -rf "$tmp"
   if [ -z "$decided" ] && [ "$status" -ne 0 ]; then
     block "Infisical: the secret scan stopped with an error (exit code $status), so the prompt was not sent."
   fi
@@ -117,6 +125,21 @@ jq_true() {
   [ "$(jq "$@" 2>/dev/null)" = true ]
 }
 
+# Usage: run_for <seconds> <command> [arguments]. Runs the command, but waits for it at most the given seconds, and
+# returns 1 when it takes longer. That command is left to finish on its own. Its input and output aren't Codex's pipes,
+# so Codex doesn't wait for it either.
+run_for() {
+  local limit=$((SECONDS + $1)) pid
+  shift
+  "$@" </dev/null >/dev/null 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    [ "$SECONDS" -lt "$limit" ] || return 1
+    sleep 0.1
+  done
+  wait "$pid"
+}
+
 # Usage: require_tools. Blocks when a tool or file the hook needs is missing.
 require_tools() {
   command -v infisical >/dev/null 2>&1 ||
@@ -139,7 +162,7 @@ scan_config_path() {
 # Creates the private temporary folder in $tmp, after removing ones that runs killed more than 5 minutes ago left
 # behind. They can hold a prompt. A run lasts at most a minute, so no running hook's folder is removed.
 make_tmp() {
-  find "$TMP_PREFIX/" -maxdepth 1 -type d -name "$TMP_NAME.*" -mmin +5 -exec rm -rf {} + 2>/dev/null
+  run_for "$CLEANUP_SECONDS" find "$TMP_PREFIX/" -maxdepth 1 -type d -name "$TMP_NAME.*" -mmin +5 -exec rm -rf {} +
   tmp="$(mktemp -d "$TMP_PREFIX/$TMP_NAME.XXXXXX")" ||
     block "Infisical: the secret scan could not create a temporary folder, so the prompt was not sent."
 }
@@ -239,11 +262,19 @@ is_subagent_prompt() {
   jq_true '.agent_id // false | . != false' "$tmp/input.json"
 }
 
-# Saves the user's request to $tmp/request.txt: the prompt without the IDE context and without leading whitespace.
-# Codex finds the request the same way, after the last marker line.
+# Saves the user's request to $tmp/request.txt, without leading whitespace: the prompt, or with IDE context, the text
+# after the marker line. Only the request can run a command, so that pasted text can't.
+#
+# The marker is trusted only when the prompt starts with the IDE header and holds the marker line exactly once: then it
+# is the one Codex added. More than one is ambiguous, because both the context, such as selected code, and the request
+# can hold it. The request is then left empty, so no command runs and the whole prompt is scanned.
 read_request() {
-  jq -j --arg marker "$REQUEST_MARKER" '
-    .prompt | (if contains($marker) then split($marker) | last else . end) | sub("\\A\\s+"; "")
+  jq -j --arg header "$IDE_HEADER" --arg marker "$REQUEST_MARKER" '
+    .prompt |
+    if startswith($header + "\n") then
+      split("\n" + $marker + "\n") | if length == 2 then .[1] else "" end
+    else . end |
+    sub("\\A\\s+"; "")
   ' "$tmp/input.json" >"$tmp/request.txt" || block "$READ_ERROR"
 }
 
@@ -370,20 +401,27 @@ run_command() {
 }
 
 # Blocks the prompt when it holds a secret that isn't allowed. Returns when it holds none.
+#
+# The decision is kept in a variable, not in a file, so that a failed write, such as on a full disk, can't turn a block
+# into a pass. Writing the list of secrets for the message comes after, and when it fails, the prompt is still blocked.
 check_prompt() {
-  local hash n=0 findings
+  local hash n=0 blocked="" findings
 
   scan_to_report "$tmp/prompt.txt" "$tmp/report.json"
   hash_secrets "$tmp/report.json" "$tmp/hashes"
   # The numbers of the secrets that aren't allowed.
-  : >"$tmp/blocked.txt"
   while read -r hash; do
-    is_allowed "$hash" || echo "$n" >>"$tmp/blocked.txt"
+    is_allowed "$hash" || blocked="$blocked $n"
     n=$((n + 1))
   done <"$tmp/hashes"
-  [ -s "$tmp/blocked.txt" ] || return 0
+  # Every secret must have been checked: a hashes file that can't be read would otherwise check none.
+  [ "$n" -eq "$(secret_count "$tmp/report.json")" ] 2>/dev/null || block "$REPORT_ERROR"
+  [ -n "$blocked" ] || return 0
 
-  findings="$(describe_secrets "$tmp/report.json" "$tmp/blocked.txt" with-lines)" || block "$REPORT_ERROR"
+  # shellcheck disable=SC2086
+  printf '%s\n' $blocked >"$tmp/blocked.txt" &&
+    findings="$(describe_secrets "$tmp/report.json" "$tmp/blocked.txt" with-lines)" ||
+    findings="  - (could not list them)"
   block "Infisical: the prompt was not sent because it contains secrets:
 $findings
 Remove them and send the prompt again. To allow a value that is safe to share, send ${ALLOW_COMMANDS[0]} <value>."
@@ -413,7 +451,7 @@ check() {
 # The worker gets the hook input on stdin, and writes why it blocked to a file that this function then shows. Writing
 # it here keeps the message when the worker can't write to a terminal itself, as a background process group.
 run_check() {
-  local pid status reason deadline=$((SECONDS + RUN_SECONDS))
+  local pid status reason
 
   # Job control gives the worker its own process group, so one kill stops the worker and its jq and infisical. Inside
   # the worker, job control must be off so that everything it runs stays in that group. Bash already turns it off in a
@@ -450,6 +488,7 @@ run_check() {
 # ----------------------------------------------------------------------------------------------------------------------
 
 main() {
+  deadline=$((SECONDS + RUN_SECONDS))
   # Nothing this script runs may reach stdout. See the top of the file.
   exec >&2
   trap on_exit EXIT

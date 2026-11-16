@@ -51,7 +51,7 @@ Codex installs a copy of the plugin, so after a change, run `codex plugin remove
 
 ## Tests
 
-The tests need the Infisical CLI and jq.
+The tests need the Infisical CLI, jq, and pgrep and pkill (procps on Linux).
 
 - `tests/test-scan-prompt.sh [bash]` tests the secret scanner's hook script on its own: prompts, allow and disallow, failures, config, and concurrent sessions. It checks every result the way Codex reads it, so a result that would let Codex send the prompt fails the test. Pass a bash binary to test another version, such as `/bin/bash` (3.2) on macOS.
 - `tests/test-codex-e2e.sh` installs the plugin into a new, empty Codex home and sends prompts through `codex exec`. It needs a logged-in Codex and makes a few small model requests. All secrets in both tests are fake and made at run time.
