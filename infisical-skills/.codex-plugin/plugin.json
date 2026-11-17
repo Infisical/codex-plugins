@@ -35,11 +35,54 @@
   "extensions": {
     "com.openai": {
       "review": {
-        "prompts": [
-          "Write a script that lists secret names in my Infisical dev environment without revealing their values.",
-          "Explain how to authenticate to the Infisical API with a machine identity using Universal Auth.",
-          "Write a REST API example that creates two sample secrets in one batch request."
-        ],
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Look up how to sync secrets to a cloud service",
+              "prompt": "Search the Infisical docs: how do I sync my Infisical secrets to AWS Secrets Manager?",
+              "tools_triggered": "search_infisical, query_docs_filesystem_infisical",
+              "expected_behavior": "Searches the Infisical documentation and explains how to connect AWS and create an AWS Secrets Manager secret sync, with links to the docs pages used."
+            },
+            {
+              "description": "Look up the Kubernetes integration",
+              "prompt": "How do I inject Infisical secrets into a Kubernetes deployment? Use the Infisical documentation.",
+              "tools_triggered": "search_infisical, query_docs_filesystem_infisical",
+              "expected_behavior": "Searches the Infisical documentation and describes the Kubernetes options, such as the Infisical Operator and the Agent Injector, with setup steps and links to the docs pages used."
+            },
+            {
+              "description": "Look up an endpoint in the API reference",
+              "prompt": "Check the Infisical API reference: what fields does the request body take when creating a secret?",
+              "tools_triggered": "query_docs_filesystem_infisical, search_infisical",
+              "expected_behavior": "Reads the create-secret endpoint in the Infisical API reference or OpenAPI spec and lists its request body fields, noting which are required, with a link to the endpoint's docs page."
+            },
+            {
+              "description": "Look up secret rotation",
+              "prompt": "Search the Infisical docs for how to set up automatic secret rotation for a PostgreSQL database.",
+              "tools_triggered": "search_infisical, query_docs_filesystem_infisical",
+              "expected_behavior": "Searches the Infisical documentation and explains how to configure PostgreSQL credentials rotation, including the prerequisites, with links to the docs pages used."
+            },
+            {
+              "description": "Write an API script with a machine identity",
+              "prompt": "Write a bash script that lists the secret names in my Infisical dev environment with the REST API, using a machine identity. Don't print values.",
+              "tools_triggered": "search_infisical",
+              "expected_behavior": "Writes a script that logs in with Universal Auth and lists secret names only, without printing values, using the endpoints from the Infisical API reference, with links to the docs pages used."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Unrelated question",
+              "prompt": "What's a good recipe for a quick vegetarian dinner?"
+            },
+            {
+              "description": "Another secrets manager",
+              "prompt": "How do I create a secret in AWS Secrets Manager with the AWS CLI?"
+            },
+            {
+              "description": "General coding task",
+              "prompt": "Write a Python function that checks whether a string is a palindrome."
+            }
+          ]
+        },
         "commerce": false,
         "commerce_description": "This informational plugin does not sell products or process payments."
       },
