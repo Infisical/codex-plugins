@@ -275,9 +275,9 @@ check_manifest() {
     [ "$value" = "./skills/" ] || problem "skills must be ./skills/."
   fi
 
-  # A package with any of these can't be submitted, or isn't a skills-only plugin.
-  for field in hooks mcpServers apps; do
-    [ "$(jq "has(\"$field\")" "$manifest")" = false ] || problem "the manifest has $field, which a skills-only plugin can't have."
+  # A package with any of these can't be submitted.
+  for field in hooks apps; do
+    [ "$(jq "has(\"$field\")" "$manifest")" = false ] || problem "the manifest has $field, which the plugin directory doesn't take."
   done
 
   object .interface || { unset -f json_type object text; return; }
@@ -342,12 +342,13 @@ check_skill() {
   unset -f field
 }
 
-# Usage: check_files <plugin folder>. The package must not hold hooks, MCP or app config, or links.
+# Usage: check_files <plugin folder>. The package must not hold hooks, app config, MCP config other than ./.mcp.json, or
+# links.
 check_files() {
   local found
-  found="$(cd "$1" && find . \( -path ./hooks -o -name .mcp.json -o -name mcp.json -o -name '*.app.json' \
-    -o -name .app.json \) -print | head -n 5)"
-  [ -z "$found" ] || problem "the plugin has files that a skills-only plugin can't have: $(echo $found)"
+  found="$(cd "$1" && find . \( -path ./hooks -o \( -name .mcp.json ! -path ./.mcp.json \) -o -name mcp.json \
+    -o -name '*.app.json' -o -name .app.json \) -print | head -n 5)"
+  [ -z "$found" ] || problem "the plugin has files that the plugin directory doesn't take: $(echo $found)"
   found="$(cd "$1" && find . -type l -print | head -n 5)"
   [ -z "$found" ] || problem "the plugin has symbolic links, which a ZIP can't keep: $(echo $found)"
 }

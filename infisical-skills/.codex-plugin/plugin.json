@@ -12,6 +12,7 @@
   "license": "MIT",
   "keywords": ["infisical", "secrets", "secrets-management", "api", "machine-identity"],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Infisical Skills",
     "shortDescription": "Work with Infisical",

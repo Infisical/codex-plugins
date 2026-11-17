@@ -129,10 +129,10 @@ ZIP="$WORK/out/infisical-skills-1.0.0.zip"
 check "writes the ZIP" test -f "$ZIP"
 check "writes the plugin folder" test -f "$WORK/out/infisical-skills/.codex-plugin/plugin.json"
 LIST="$(unzip -Z1 "$ZIP" | LC_ALL=C sort)"
-EXPECTED="$(printf '%s\n' .codex-plugin/plugin.json assets/icon.png assets/logo.png \
+EXPECTED="$(printf '%s\n' .codex-plugin/plugin.json .mcp.json assets/icon.png assets/logo.png \
   skills/infisical-api/SKILL.md skills/infisical-api/references/authentication.md | LC_ALL=C sort)"
 OUT="$LIST"
-check "the ZIP holds the manifest at its top, the icons, and only the listed skill, without the README" test "$LIST" = "$EXPECTED"
+check "the ZIP holds the manifest at its top, the MCP config, the icons, and only the listed skill, without the README" test "$LIST" = "$EXPECTED"
 check "the manifest in the ZIP is the template's" \
   bash -c 'unzip -p "$1" .codex-plugin/plugin.json | cmp -s - "$2/.codex-plugin/plugin.json"' _ "$ZIP" "$TPL"
 check "the skill in the ZIP is the source's" \
@@ -331,7 +331,7 @@ bad_manifest() {
 }
 
 bad_manifest "a manifest with hooks fails" '.hooks = "./hooks/hooks.json"' "has hooks"
-bad_manifest "a manifest with an MCP server fails" '.mcpServers = "./.mcp.json"' "has mcpServers"
+bad_manifest "a manifest with apps fails" '.apps = "./.app.json"' "has apps"
 bad_manifest "an invalid name fails" '.name = "Infisical_Plugin"' "name must be"
 bad_manifest "an invalid version fails" '.version = "v1"' "version must be"
 bad_manifest "a missing description fails" 'del(.description)' "description is missing"
